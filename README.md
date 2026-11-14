@@ -1,0 +1,2 @@
+# kanamikanai
+fanyi
