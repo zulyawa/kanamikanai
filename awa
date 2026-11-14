@@ -1,0 +1,309 @@
+
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#f7f5ff">
+<title>KanaLens - 日语注音助手</title>
+
+<style>
+*{box-sizing:border-box}
+body{
+  margin:0;padding:22px 16px 40px;
+  font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
+  background:#f7f5ff;color:#29243b;
+}
+.container{max-width:650px;margin:auto}
+header{text-align:center;margin:20px 0 28px}
+h1{font-size:32px;margin:0 0 8px;color:#6746c3}
+.sub{color:#777187;font-size:14px}
+.panel{
+  background:white;border-radius:20px;padding:18px;
+  margin-bottom:16px;box-shadow:0 5px 22px #30205c0b;
+}
+label{font-weight:650;display:block;margin-bottom:10px}
+textarea{
+  width:100%;min-height:135px;padding:14px;
+  border:1px solid #e4dfef;border-radius:13px;
+  font-size:17px;resize:vertical;line-height:1.7;
+  outline:none;background:#fff;
+}
+textarea:focus{border-color:#8b6bd6}
+button{
+  border:0;border-radius:12px;padding:13px 17px;
+  background:#7654c9;color:white;font-size:15px;
+  font-weight:600;cursor:pointer;
+}
+button:disabled{opacity:.5}
+.secondary{background:#eee9f8;color:#503a85}
+.buttons{display:flex;gap:9px;flex-wrap:wrap;margin-top:13px}
+.result{margin-top:12px}
+.result-label{font-size:12px;color:#887e9b;margin-bottom:7px}
+.result-text{
+  font-size:20px;line-height:1.9;
+  overflow-wrap:anywhere;white-space:pre-wrap;
+}
+.romaji{font-size:17px;color:#6746c3}
+.status{font-size:13px;color:#81778f;margin-top:10px}
+.error{color:#c03950}
+.ok{color:#27845c}
+.file{font-size:14px;max-width:100%}
+footer{text-align:center;color:#9992a7;font-size:12px;margin-top:25px}
+</style>
+</head>
+
+<body>
+<div class="container">
+
+<header>
+  <h1>🌸 KanaLens</h1>
+  <div class="sub">日语汉字注音 · 平假名 · 罗马音</div>
+</header>
+
+<div class="panel">
+  <label for="source">输入日语内容</label>
+  <textarea id="source" placeholder="例如：私は日本語を勉強しています。"></textarea>
+
+  <div class="buttons">
+    <button id="convertBtn" onclick="convertText()">开始注音</button>
+    <button class="secondary" onclick="clearAll()">清空</button>
+  </div>
+
+  <div id="status" class="status">正在加载日语分析引擎……</div>
+</div>
+
+<div class="panel">
+  <label>① 日语原文</label>
+  <div id="original" class="result-text">等待输入……</div>
+</div>
+
+<div class="panel">
+  <label>② 平假名注音</label>
+  <div class="result-label">汉字自动转换为假名</div>
+  <div id="kana" class="result-text">等待转换……</div>
+  <div class="buttons">
+    <button class="secondary" onclick="copyResult('kana')">复制假名</button>
+  </div>
+</div>
+
+<div class="panel">
+  <label>③ 罗马音</label>
+  <div class="result-label">Hepburn 风格</div>
+  <div id="romaji" class="result-text romaji">等待转换……</div>
+  <div class="buttons">
+    <button class="secondary" onclick="copyResult('romaji')">复制罗马音</button>
+    <button class="secondary" onclick="copyAll()">复制全部</button>
+  </div>
+</div>
+
+<div class="panel">
+  <label>📷 截图文字识别</label>
+  <input class="file" type="file" id="imageInput" accept="image/*">
+  <div class="buttons">
+    <button class="secondary" onclick="recognizeImage()">识别截图</button>
+  </div>
+  <div id="ocrStatus" class="status">
+    选择一张含日语的截图，识别后可以进行注音。
+  </div>
+</div>
+
+<footer>
+  KanaLens V6 · Japanese Reading Assistant
+</footer>
+</div>
+
+<!-- 日语分析引擎 -->
+<script src="https://cdn.jsdelivr.net/npm/kuroshiro@1.2.0/dist/kuroshiro.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/kuroshiro-analyzer-kuromoji@1.1.0/dist/kuroshiro-analyzer-kuromoji.min.js"></script>
+
+<!-- 图片文字识别 -->
+<script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
+
+<script>
+let kuroshiro = null;
+let engineReady = false;
+let currentOriginal = "";
+let currentKana = "";
+let currentRomaji = "";
+
+const statusEl = document.getElementById("status");
+const convertBtn = document.getElementById("convertBtn");
+
+function setStatus(message, type="") {
+  statusEl.textContent = message;
+  statusEl.className = "status " + type;
+}
+
+// 初始化日语分析引擎
+async function initEngine() {
+  try {
+    if (typeof Kuroshiro === "undefined") {
+      throw new Error("Kuroshiro 加载失败，请检查网络或 CDN。");
+    }
+
+    if (typeof KuromojiAnalyzer === "undefined") {
+      throw new Error("Kuromoji 分析器加载失败，请检查网络。");
+    }
+
+    kuroshiro = new Kuroshiro();
+
+    const analyzer = new KuromojiAnalyzer({
+      dictPath: "https://cdn.jsdelivr.net/npm/kuromoji@0.1.2/dict/"
+    });
+
+    await kuroshiro.init(analyzer);
+
+    engineReady = true;
+    setStatus("日语词典加载成功，可以开始注音。","ok");
+    convertBtn.disabled = false;
+
+  } catch (error) {
+    engineReady = false;
+    setStatus("引擎加载失败：" + error.message,"error");
+    convertBtn.disabled = false;
+    console.error(error);
+  }
+}
+
+async function convertText() {
+  const input = document.getElementById("source").value.trim();
+
+  if (!input) {
+    setStatus("请先输入日语内容。","error");
+    return;
+  }
+
+  if (!engineReady) {
+    setStatus("日语引擎尚未准备好，请等待或刷新页面。","error");
+    return;
+  }
+
+  convertBtn.disabled = true;
+  setStatus("正在分析日语词语和汉字读音……");
+
+  try {
+    currentOriginal = input;
+
+    // 使用词典分析上下文并转换为平假名
+    currentKana = await kuroshiro.convert(input, {
+      to: "hiragana",
+      mode: "normal"
+    });
+
+    // 将分析结果转换为罗马音
+    currentRomaji = await kuroshiro.convert(input, {
+      to: "romaji",
+      mode: "normal",
+      romajiSystem: "hepburn"
+    });
+
+    document.getElementById("original").textContent = currentOriginal;
+    document.getElementById("kana").textContent = currentKana;
+    document.getElementById("romaji").textContent = currentRomaji;
+
+    setStatus("注音完成。请注意，人名和特殊词汇可能存在读音差异。","ok");
+
+  } catch (error) {
+    console.error(error);
+    setStatus("转换失败：" + error.message,"error");
+  } finally {
+    convertBtn.disabled = false;
+  }
+}
+
+function clearAll() {
+  document.getElementById("source").value = "";
+  document.getElementById("original").textContent = "等待输入……";
+  document.getElementById("kana").textContent = "等待转换……";
+  document.getElementById("romaji").textContent = "等待转换……";
+  currentOriginal = "";
+  currentKana = "";
+  currentRomaji = "";
+  setStatus(engineReady ? "可以开始注音。" : "日语引擎尚未加载。");
+}
+
+async function copyResult(id) {
+  const value = document.getElementById(id).textContent;
+  if (!value || value === "等待转换……") return;
+
+  try {
+    await navigator.clipboard.writeText(value);
+    setStatus("复制成功。","ok");
+  } catch(e) {
+    setStatus("复制失败，请手动选择文字。","error");
+  }
+}
+
+async function copyAll() {
+  if (!currentOriginal) return;
+
+  const value =
+    currentOriginal + "\n" +
+    currentKana + "\n" +
+    currentRomaji;
+
+  try {
+    await navigator.clipboard.writeText(value);
+    setStatus("原文、假名和罗马音已复制。","ok");
+  } catch(e) {
+    setStatus("复制失败，请手动选择文字。","error");
+  }
+}
+
+// 截图 OCR
+async function recognizeImage() {
+  const file = document.getElementById("imageInput").files[0];
+  const ocrStatus = document.getElementById("ocrStatus");
+
+  if (!file) {
+    ocrStatus.textContent = "请先选择一张截图。";
+    return;
+  }
+
+  if (typeof Tesseract === "undefined") {
+    ocrStatus.textContent = "OCR 引擎加载失败，请检查网络。";
+    return;
+  }
+
+  try {
+    ocrStatus.textContent = "正在识别图片，请稍等……";
+
+    const result = await Tesseract.recognize(file, "jpn", {
+      logger: info => {
+        if (info.status) {
+          ocrStatus.textContent =
+            info.status + " " +
+            Math.round((info.progress || 0) * 100) + "%";
+        }
+      }
+    });
+
+    const text = result.data.text.trim();
+
+    if (!text) {
+      ocrStatus.textContent = "没有识别到日语文字。";
+      return;
+    }
+
+    document.getElementById("source").value = text;
+    ocrStatus.textContent = "识别成功，正在准备注音。";
+
+    if (engineReady) {
+      await convertText();
+    } else {
+      ocrStatus.textContent = "文字已提取，请等待日语引擎加载后点击注音。";
+    }
+
+  } catch(error) {
+    console.error(error);
+    ocrStatus.textContent = "图片识别失败：" + error.message;
+  }
+}
+
+// 页面启动
+convertBtn.disabled = true;
+initEngine();
+</script>
+</body>
+</html>
